@@ -1,119 +1,133 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebXR AR Robot Shooter</title>
-  <style>
-    body { margin: 0; overflow: hidden; }
-    #scoreboard {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      font-size: 20px;
-      color: white;
-      z-index: 1;
-      font-family: monospace;
-      background: rgba(0, 0, 0, 0.5);
-      padding: 5px 10px;
-      border-radius: 5px;
-    }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Roomscale VR Shooter</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #000; color: white; }
+  #scoreboard {
+    position: absolute; top: 10px; left: 10px;
+    font-family: monospace; font-size: 20px;
+    background: rgba(0,0,0,0.5); padding: 6px 12px;
+    border-radius: 5px; z-index: 10;
+  }
+</style>
 </head>
 <body>
 <div id="scoreboard">Score: 0</div>
+
 <script type="module">
 import * as THREE from 'https://cdn.skypack.dev/three';
-import { ARButton } from 'https://cdn.skypack.dev/three/examples/jsm/webxr/ARButton.js';
+import { VRButton } from 'https://cdn.skypack.dev/three/examples/jsm/webxr/VRButton.js';
 
 let scene, camera, renderer, controller;
-let enemies = [];
-let bullets = [];
+let enemies = [], bullets = [];
 let score = 0;
-const scoreDisplay = document.getElementById("scoreboard");
-const laserSound = new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_34f27420c6.mp3?filename=laser-shooting-sound-108718.mp3');
+const scoreDisplay = document.getElementById('scoreboard');
 
 init();
 animate();
 
 function init() {
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+  scene.background = new THREE.Color(0x202025);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+  camera.position.set(0, 1.6, 3); // typical eye height
+
+  renderer = new THREE.WebGLRenderer({antialias:true});
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-  renderer.xr.setReferenceSpaceType('local');
   document.body.appendChild(renderer.domElement);
-  document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+  document.body.appendChild(VRButton.createButton(renderer));
 
-  const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-  scene.add(light);
+  // Lighting
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444);
+  hemiLight.position.set(0, 20, 0);
+  scene.add(hemiLight);
 
+  const dirLight = new THREE.DirectionalLight(0xffffff);
+  dirLight.position.set(3, 10, 10);
+  scene.add(dirLight);
+
+  // Floor (large for walking)
+  const floorGeometry = new THREE.PlaneGeometry(20, 20);
+  const floorMaterial = new THREE.MeshStandardMaterial({color: 0x222222});
+  const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+  floor.rotation.x = -Math.PI/2;
+  scene.add(floor);
+
+  // Controller
   controller = renderer.xr.getController(0);
   controller.addEventListener('select', shoot);
   scene.add(controller);
 
-  for (let i = 0; i < 5; i++) {
-    const enemy = createRobot();
-    enemy.position.set(Math.random() * 2 - 1, 0, -1.5 - i * 0.5);
+  // Enemies - red cubes scattered in the space
+  for(let i=0; i<10; i++) {
+    const enemy = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.5, 0.5),
+      new THREE.MeshStandardMaterial({color: 0xff0000})
+    );
+    enemy.position.set((Math.random()-0.5)*10, 0.25, (Math.random()-0.5)*10 - 5);
     scene.add(enemy);
     enemies.push(enemy);
   }
-}
 
-function createRobot() {
-  const robot = new THREE.Group();
-
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.2, 0.2, 0.5, 16),
-    new THREE.MeshStandardMaterial({ color: 0x5555ff })
-  );
-  robot.add(body);
-
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.15, 16, 16),
-    new THREE.MeshStandardMaterial({ color: 0xff5555 })
-  );
-  head.position.y = 0.4;
-  robot.add(head);
-
-  return robot;
+  window.addEventListener('resize', onWindowResize, false);
 }
 
 function shoot() {
   const bullet = new THREE.Mesh(
-    new THREE.SphereGeometry(0.02, 8, 8),
-    new THREE.MeshBasicMaterial({ color: 0xffff00 })
+    new THREE.SphereGeometry(0.03, 8, 8),
+    new THREE.MeshBasicMaterial({color: 0xffff00})
   );
-  bullet.position.copy(controller.position);
-  bullet.quaternion.copy(controller.quaternion);
-  bullet.userData.velocity = new THREE.Vector3(0, 0, -0.2).applyQuaternion(controller.quaternion);
+
+  // Start bullet at controller position
+  bullet.position.setFromMatrixPosition(controller.matrixWorld);
+
+  // Shoot forward from controller orientation
+  const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
+  bullet.userData.velocity = direction.multiplyScalar(0.4);
+
   scene.add(bullet);
   bullets.push(bullet);
-
-  laserSound.currentTime = 0;
-  laserSound.play();
 }
 
 function animate() {
   renderer.setAnimationLoop(() => {
-    bullets.forEach((bullet, i) => {
+    // Move bullets and check collisions
+    bullets.forEach((bullet, bIndex) => {
       bullet.position.add(bullet.userData.velocity);
-      enemies.forEach((enemy, j) => {
-        if (enemy && bullet.position.distanceTo(enemy.position) < 0.3) {
+
+      enemies.forEach((enemy, eIndex) => {
+        if(enemy && bullet.position.distanceTo(enemy.position) < 0.5) {
           scene.remove(enemy);
-          enemies[j] = null;
+          enemies[eIndex] = null;
+          scene.remove(bullet);
+          bullets.splice(bIndex, 1);
           score += 10;
-          scoreDisplay.innerText = "Score: " + score;
+          scoreDisplay.textContent = 'Score: ' + score;
         }
       });
+
+      // Remove bullet if out of bounds
+      if(Math.abs(bullet.position.x) > 20 || Math.abs(bullet.position.z) > 20) {
+        scene.remove(bullet);
+        bullets.splice(bIndex, 1);
+      }
     });
 
     renderer.render(scene, camera);
   });
 }
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
 </script>
 </body>
 </html>
+
