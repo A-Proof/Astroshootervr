@@ -1,323 +1,63 @@
-    
-  <!DOCTYPE html>
+    <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>WebXR Ball Shooter with Robots</title>
-<style>
-  body {
-    margin: 0; overflow: hidden; font-family: monospace; background: #111;
-    color: white;
-  }
-  #score {
-    position: absolute;
-    top: 10px; left: 10px;
-    font-size: 22px;
-    background: rgba(0,0,0,0.6);
-    padding: 8px 12px;
-    border-radius: 8px;
-    user-select: none;
-    z-index: 999;
-  }
-</style>
-</head>
-<body>
-<div id="score">Score: 0</div>
+	<head>
+		<title>Mow</title>
+		<meta charset="utf-8">
+		<meta name="generator" content="Three.js Editor">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				font-family: sans-serif;
+				font-size: 11px;
+				background-color: #000;
+				margin: 0px;
+			}
+			canvas {
+				display: block;
+			}
+		</style>
+	</head>
+	<body ontouchstart="">
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "./js/three.module.js"
+				}
+			}
+		</script>
+		<script type="module">
 
-<script type="module">
+			import * as THREE from 'three';
+			import { APP } from './js/app.js';
 
-import * as THREE from 'https://cdn.skypack.dev/three@0.153.0';
-import { BoxLineGeometry } from 'https://cdn.skypack.dev/three@0.153.0/examples/jsm/geometries/BoxLineGeometry.js';
-import { XRButton } from 'https://cdn.skypack.dev/three@0.153.0/examples/jsm/webxr/XRButton.js';
-import { XRControllerModelFactory } from 'https://cdn.skypack.dev/three@0.153.0/examples/jsm/webxr/XRControllerModelFactory.js';
-import { RapierPhysics } from 'https://cdn.skypack.dev/three@0.153.0/examples/jsm/physics/RapierPhysics.js';
+			window.THREE = THREE; // Used by APP Scripts.
 
-let camera, scene, renderer;
-let controller1, controller2;
-let controllerGrip1, controllerGrip2;
-let physics;
-let spheres;
-const sphereCount = 800;
-let count = 0;
-let robots = [];
-let score = 0;
-const scoreDiv = document.getElementById('score');
+			var loader = new THREE.FileLoader();
+			loader.load( 'app.json', function ( text ) {
 
-const velocity = new THREE.Vector3();
+				var player = new APP.Player();
+				player.load( JSON.parse( text ) );
+				player.setSize( window.innerWidth, window.innerHeight );
+				player.play();
 
-init();
-await initPhysics();
+				document.body.appendChild( player.dom );
 
-function init() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x505050);
+				window.addEventListener( 'resize', function () {
 
-  camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 50);
-  camera.position.set(0, 1.6, 3);
+					player.setSize( window.innerWidth, window.innerHeight );
 
-  // Room wireframe box
-  const room = new THREE.LineSegments(
-    new BoxLineGeometry(6, 6, 6, 10, 10, 10),
-    new THREE.LineBasicMaterial({color: 0x808080})
-  );
-  room.geometry.translate(0, 3, 0);
-  scene.add(room);
+				} );
 
-  // Lighting
-  scene.add(new THREE.HemisphereLight(0xbbbbbb, 0x888888, 3));
-  const dirLight = new THREE.DirectionalLight(0xffffff, 3);
-  dirLight.position.set(1, 1, 1).normalize();
-  scene.add(dirLight);
+			} );
 
-  // Renderer
-  renderer = new THREE.WebGLRenderer({antialias: true});
-  renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setAnimationLoop(animate);
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
+			let button = document.createElement( 'a' );
+			button.href = 'https://threejs.org/editor/#file=' + location.href.split( '/' ).slice( 0, - 1 ).join( '/' ) + '/app.json';
+			button.style.cssText = 'position: absolute; bottom: 20px; right: 20px; padding: 10px 16px; color: #fff; border: 1px solid #fff; border-radius: 20px; text-decoration: none;';
+			button.target = '_blank';
+			button.textContent = 'EDIT';
+			document.body.appendChild( button );
 
-  // Controllers
-  function onSelectStart() {
-    this.userData.isSelecting = true;
-    shootBall(this);
-  }
-
-  function onSelectEnd() {
-    this.userData.isSelecting = false;
-  }
-
-  controller1 = renderer.xr.getController(0);
-  controller1.addEventListener('selectstart', onSelectStart);
-  controller1.addEventListener('selectend', onSelectEnd);
-  controller1.addEventListener('connected', function(event) {
-    this.add(buildController(event.data));
-  });
-  controller1.addEventListener('disconnected', function() {
-    this.remove(this.children[0]);
-  });
-  scene.add(controller1);
-
-  controller2 = renderer.xr.getController(1);
-  controller2.addEventListener('selectstart', onSelectStart);
-  controller2.addEventListener('selectend', onSelectEnd);
-  controller2.addEventListener('connected', function(event) {
-    this.add(buildController(event.data));
-  });
-  controller2.addEventListener('disconnected', function() {
-    this.remove(this.children[0]);
-  });
-  scene.add(controller2);
-
-  const controllerModelFactory = new XRControllerModelFactory();
-
-  controllerGrip1 = renderer.xr.getControllerGrip(0);
-  controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
-  scene.add(controllerGrip1);
-
-  controllerGrip2 = renderer.xr.getControllerGrip(1);
-  controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
-  scene.add(controllerGrip2);
-
-  window.addEventListener('resize', onWindowResize);
-
-  document.body.appendChild(XRButton.createButton(renderer, {
-    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
-  }));
-
-  // Sounds
-  setupSounds();
-}
-
-function buildController(data) {
-  let geometry, material;
-  switch (data.targetRayMode) {
-    case 'tracked-pointer':
-      geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0,0,0,-1], 3));
-      geometry.setAttribute('color', new THREE.Float32BufferAttribute([0.5,0.5,0.5,0,0,0], 3));
-      material = new THREE.LineBasicMaterial({vertexColors: true, blending: THREE.AdditiveBlending});
-      return new THREE.Line(geometry, material);
-    case 'gaze':
-      geometry = new THREE.RingGeometry(0.02, 0.04, 32).translate(0,0,-1);
-      material = new THREE.MeshBasicMaterial({opacity: 0.5, transparent: true});
-      return new THREE.Mesh(geometry, material);
-  }
-}
-
-async function initPhysics() {
-  physics = await RapierPhysics();
-
-  // Floor
-  {
-    const geometry = new THREE.BoxGeometry(6, 2, 6);
-    const material = new THREE.MeshNormalMaterial({visible: false});
-    const floor = new THREE.Mesh(geometry, material);
-    floor.position.y = -1;
-    floor.userData.physics = {mass: 0};
-    scene.add(floor);
-  }
-
-  // Walls
-  {
-    const geometry = new THREE.BoxGeometry(6, 2, 6);
-    const material = new THREE.MeshNormalMaterial({visible: false});
-    const wallPX = new THREE.Mesh(geometry, material);
-    wallPX.position.set(4, 3, 0);
-    wallPX.rotation.z = Math.PI/2;
-    wallPX.userData.physics = {mass: 0};
-    scene.add(wallPX);
-
-    const wallNX = new THREE.Mesh(geometry, material);
-    wallNX.position.set(-4, 3, 0);
-    wallNX.rotation.z = Math.PI/2;
-    wallNX.userData.physics = {mass: 0};
-    scene.add(wallNX);
-
-    const wallPZ = new THREE.Mesh(geometry, material);
-    wallPZ.position.set(0, 3, 4);
-    wallPZ.rotation.x = Math.PI/2;
-    wallPZ.userData.physics = {mass: 0};
-    scene.add(wallPZ);
-
-    const wallNZ = new THREE.Mesh(geometry, material);
-    wallNZ.position.set(0, 3, -4);
-    wallNZ.rotation.x = Math.PI/2;
-    wallNZ.userData.physics = {mass: 0};
-    scene.add(wallNZ);
-  }
-
-  // Spheres (balls)
-  const geometry = new THREE.IcosahedronGeometry(0.08, 3);
-  const material = new THREE.MeshLambertMaterial();
-  spheres = new THREE.InstancedMesh(geometry, material, sphereCount);
-  spheres.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  spheres.userData.physics = {mass: 1, restitution: 1.1};
-  scene.add(spheres);
-
-  const matrix = new THREE.Matrix4();
-  const color = new THREE.Color();
-
-  for (let i=0; i<spheres.count; i++) {
-    const x = Math.random() * 4 - 2;
-    const y = Math.random() * 4;
-    const z = Math.random() * 4 - 2;
-    matrix.setPosition(x, y, z);
-    spheres.setMatrixAt(i, matrix);
-    spheres.setColorAt(i, color.setHex(0xffffff * Math.random()));
-  }
-
-  physics.addScene(scene);
-
-  spawnRobots();
-}
-
-function spawnRobots() {
-  const geometry = new THREE.BoxGeometry(0.4, 0.8, 0.4);
-  const material = new THREE.MeshStandardMaterial({color: 0xff0000});
-  for (let i=0; i<10; i++) {
-    const robot = new THREE.Mesh(geometry, material);
-    robot.position.set(
-      (Math.random() - 0.5) * 4,
-      0,
-      (Math.random() - 0.5) * 4
-    );
-    scene.add(robot);
-    robot.userData.physicsBody = physics.createRigidBody(robot, {mass: 0});
-    robots.push(robot);
-  }
-}
-
-function shootBall(controller) {
-  playShootSound();
-
-  const matrix = new THREE.Matrix4();
-  matrix.identity();
-  spheres.getMatrixAt(count, matrix);
-  
-  // Position ball at controller position
-  matrix.setPosition(controller.position);
-  spheres.setMatrixAt(count, matrix);
-  spheres.instanceMatrix.needsUpdate = true;
-
-  // Velocity vector
-  velocity.x = (Math.random() - 0.5) * 2;
-  velocity.y = (Math.random() - 0.5) * 2;
-  velocity.z = -9;
-  velocity.applyQuaternion(controller.quaternion);
-
-  physics.setMeshVelocity(spheres, velocity, count);
-
-  count++;
-  if (count === spheres.count) count = 0;
-}
-
-function setupSounds() {
-  window.shootSound = new Audio('https://freesound.org/data/previews/341/341695_624695-lq.mp3');
-  window.hitSound = new Audio('https://freesound.org/data/previews/335/335908_5121236-lq.mp3');
-}
-
-function playShootSound() {
-  if(window.shootSound) {
-    window.shootSound.currentTime = 0;
-    window.shootSound.play();
-  }
-}
-
-function playHitSound() {
-  if(window.hitSound) {
-    window.hitSound.currentTime = 0;
-    window.hitSound.play();
-  }
-}
-
-function checkBallRobotCollisions() {
-  for (let i=0; i<spheres.count; i++) {
-    const matrix = new THREE.Matrix4();
-    spheres.getMatrixAt(i, matrix);
-    const ballPos = new THREE.Vector3();
-    ballPos.setFromMatrixPosition(matrix);
-
-    for (let r=robots.length-1; r>=0; r--) {
-      const robot = robots[r];
-      if (!robot) continue;
-      const dist = ballPos.distanceTo(robot.position);
-      if (dist < 0.5) {
-        scene.remove(robot);
-        physics.removeRigidBody(robot.userData.physicsBody);
-        robots.splice(r, 1);
-        score += 10;
-        scoreDiv.textContent = 'Score: ' + score;
-        playHitSound();
-      }
-    }
-  }
-}
-
-function animate() {
-  // This moves balls with controller velocity for balls already shot
-  handleController(controller1);
-  handleController(controller2);
-
-  checkBallRobotCollisions();
-
-  renderer.render(scene, camera);
-}
-
-function handleController(controller) {
-  if (controller.userData.isSelecting) {
-    // Optionally shoot repeatedly when holding trigger
-  }
-}
-
-function onWindowResize() {
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-</script>
-
-</body>
+		</script>
+	</body>
 </html>
+
